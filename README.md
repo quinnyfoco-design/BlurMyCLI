@@ -1,7 +1,7 @@
 # **BlurMyCLI<sup>v0.0.1</sup>** 
  
 ### **֎** Description:
-BlurMyCLI are simple, user friendly and CLI focused Hyprland dotfiles with CLI utils.
+BlurMyCLI is a simple, user friendly and CLI focused set of Hyprland dotfiles with CLI utils.
 ##
 **Thanks to**:
 
