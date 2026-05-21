@@ -1,7 +1,6 @@
-# **BlurMyCLI<sup>v0.0.1</sup>**
-
-## 
+# **BlurMyCLI<sup>v0.0.1</sup>** 
  
+### description:
 simple, user friendly and non opinionated dotfiles and CLI utils.
 ##
 **Thanks to**:
