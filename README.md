@@ -1,5 +1,6 @@
-## BlurMyCLI: 
-**simple, user friendly and non opinionated dotfiles and CLI utils**
+## 
+**BlurMyCLI**: 
+simple, user friendly and non opinionated dotfiles and CLI utils.
 ##
 **Thanks to**:
 
