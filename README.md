@@ -53,3 +53,6 @@ Move windows(with keys) = Super+Shift+arrows OR hjkl
 Hide window = Super+N
 Show hidden window(covers tiled windows) = Super+B
 Tile hidden window(if hidden window is focused on) = Super+Shift+B
+
+> [!IMPORTANT]
+> For the Zen browser to be transparent you will need to set it up, i am not providing a tutorial for this but you will find some easily on youtube.
