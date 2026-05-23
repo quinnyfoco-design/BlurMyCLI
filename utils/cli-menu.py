@@ -24,7 +24,7 @@ def menu() -> list[Item]:
     items = [
         Item("Apps", icon="\uf07c", comment="Launch applications", children=[
             Item("Files", "dolphin", icon="\uf07c", comment="File manager"),
-            Item("Terminal", "kitty", icon="\uf489", comment="Terminal emulator"),
+            Item("Terminal", "__TERMINAL__", icon="\uf489", comment="Terminal emulator"),
             Item("Browser", "zen-browser", icon="\uf269", comment="Web browser"),
             Item("Editor", "vim", icon="\uf4ae", comment="Text editor"),
             Item("Launcher", "wofi --show drun", icon="\uf002", comment="App launcher"),
@@ -50,9 +50,9 @@ def menu() -> list[Item]:
             Item("Light Mode", "gsettings set org.gnome.desktop.interface color-scheme prefer-light", icon="\uf185", comment="Light theme"),
         ]),
         Item("System", icon="\uf200", comment="System tools", children=[
-            Item("Monitor", "kitty -e htop", icon="\uf200", comment="Process monitor"),
-            Item("Network", "kitty -e nmtui", icon="\uf1eb", comment="Network manager"),
-            Item("Config", "kitty -e vim ~/.config/hypr/hyprland.conf", icon="\uf013", comment="Edit hyprland.conf"),
+            Item("Monitor", "__TERMINAL__ -e htop", icon="\uf200", comment="Process monitor"),
+            Item("Network", "__TERMINAL__ -e nmtui", icon="\uf1eb", comment="Network manager"),
+            Item("Config", "__TERMINAL__ -e vim ~/.config/hypr/hyprland.conf", icon="\uf013", comment="Edit hyprland.conf"),
         ]),
     ]
 
@@ -60,7 +60,7 @@ def menu() -> list[Item]:
     if pf.is_file():
         choices = pf.read_text().strip().split()
         items.insert(3, Item("Fan Profile", icon="\uf2f9", comment="Laptop fan speed curve", children=[
-            Item(c, f"kitty -e sh -c 'echo {c} | sudo tee /sys/firmware/acpi/platform_profile && echo Done. Press any key... && read -n1'", icon="\uf2f9", comment=f"Set fan profile to {c}")
+            Item(c, f"__TERMINAL__ -e sh -c 'echo {c} | sudo tee /sys/firmware/acpi/platform_profile && echo Done. Press any key... && read -n1'", icon="\uf2f9", comment=f"Set fan profile to {c}")
             for c in choices
         ]))
 

@@ -25,5 +25,5 @@ function fish_prompt
         set path "/home"
     end
 
-    echo -n " $path    "
+    echo -n " $path  $  "
 end

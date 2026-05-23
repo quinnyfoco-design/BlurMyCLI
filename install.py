@@ -16,6 +16,7 @@ XDG_CONFIG = Path.home() / ".config"
 DEPS = [
     ("hyprland",   "hyprctl",      None),
     ("kitty",      "kitty",        None),
+    ("alacritty",  "alacritty",    None),
     ("fish",       "fish",         None),
     ("python3",    "python3",      None),
     ("hyprsunset", "hyprsunset",   None),
@@ -34,6 +35,33 @@ DEPS = [
 TITLE = "BlurMyCLI Installer"
 VERSION = "v0.0.1"
 
+THEME = {
+    "accent": -1,
+    "highlight": -1,
+    "dim": -1,
+    "success": -1,
+    "error": -1,
+    "border": -1,
+}
+
+
+def init_theme():
+    if curses.has_colors():
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_MAGENTA, -1)
+        curses.init_pair(3, curses.COLOR_YELLOW, -1)
+        curses.init_pair(4, curses.COLOR_GREEN, -1)
+        curses.init_pair(5, curses.COLOR_RED, -1)
+        curses.init_pair(6, curses.COLOR_WHITE, -1)
+        curses.init_pair(7, curses.COLOR_BLUE, -1)
+        THEME["accent"] = curses.color_pair(1)
+        THEME["highlight"] = curses.color_pair(2) | curses.A_BOLD
+        THEME["dim"] = curses.A_DIM
+        THEME["success"] = curses.color_pair(4)
+        THEME["error"] = curses.color_pair(5)
+        THEME["border"] = curses.color_pair(6) | curses.A_DIM
+
 
 class InstallState:
     def __init__(self):
@@ -46,6 +74,8 @@ class InstallState:
         self.existing_dirs: list[str] = []
         self.kb_layout = "us"
         self.wallpaper_path = ""
+        self.terminal_choice = "kitty"
+        self.kb_mode = "my_binds"
         self.confirmed = False
 
 
@@ -77,6 +107,7 @@ def find_existing_configs(state: InstallState):
     checks = [
         ("hypr",    XDG_CONFIG / "hypr" / "hyprland.conf"),
         ("kitty",   XDG_CONFIG / "kitty" / "kitty.conf"),
+        ("alacritty", XDG_CONFIG / "alacritty" / "alacritty.toml"),
         ("fish",    XDG_CONFIG / "fish" / "config.fish"),
         ("opencode", XDG_CONFIG / "opencode" / "opencode.jsonc"),
         ("opencode", XDG_CONFIG / "opencode" / "tui.json"),
@@ -88,18 +119,54 @@ def find_existing_configs(state: InstallState):
             state.existing_dirs.append(name)
 
 
+def draw_box(stdscr, y, x, h, w, attr=None):
+    if attr is None:
+        attr = THEME["border"]
+    if w < 4 or h < 2:
+        return
+    btm = y + h - 1
+    right = x + w - 1
+    try:
+        stdscr.addstr(y, x, "\u256d", attr)
+        stdscr.addstr(y, right, "\u256e", attr)
+        stdscr.addstr(btm, x, "\u2570", attr)
+        stdscr.addstr(btm, right, "\u256f", attr)
+        for cx in range(x + 1, right):
+            stdscr.addstr(y, cx, "\u2500", attr)
+            stdscr.addstr(btm, cx, "\u2500", attr)
+        for cy in range(y + 1, btm):
+            stdscr.addstr(cy, x, "\u2502", attr)
+            stdscr.addstr(cy, right, "\u2502", attr)
+    except curses.error:
+        pass
+
+
+def draw_horiz(stdscr, y, x, w, attr=None):
+    if attr is None:
+        attr = THEME["border"]
+    try:
+        for cx in range(x, x + w):
+            stdscr.addstr(y, cx, "\u2500", attr)
+    except curses.error:
+        pass
+
+
 def draw_footer(stdscr, text):
     rows, cols = stdscr.getmaxyx()
-    if cols < 4:
+    if cols < 6:
         return
-    stdscr.addstr(rows - 1, 0, "\u2502", curses.A_DIM)
-    stdscr.addstr(rows - 1, 2, text[:cols - 4], curses.A_DIM)
-    if cols - 1 > 2:
-        try:
-            x = min(cols - 2, len(text) + 2)
-            stdscr.addstr(rows - 1, max(x, 2), "\u2502", curses.A_DIM)
-        except curses.error:
-            pass
+    try:
+        attr = THEME["dim"]
+        stdscr.addstr(rows - 2, 2, "\u2570" + "\u2500" * (cols - 6) + "\u256f", attr)
+    except curses.error:
+        pass
+    try:
+        cx = (cols - len(text)) // 2
+        if cx < 2:
+            cx = 2
+        stdscr.addstr(rows - 2, cx, f" {text} ", THEME["dim"])
+    except curses.error:
+        pass
 
 
 def await_key(stdscr):
@@ -114,22 +181,32 @@ def await_key(stdscr):
 def screen_welcome(stdscr):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
+    if cols < 40:
+        return False
 
-    lines = [
-        "",
-        f"   {TITLE}   ",
-        f"   {VERSION}   ",
-        "",
-        "   A CLI-focused Hyprland dotfile setup   ",
-        "",
-        "   Press SPACE / ENTER to begin...   ",
-        "   Press ESC / Q to quit   ",
-    ]
-    start = max(0, (rows - len(lines)) // 2)
-    for i, line in enumerate(lines):
-        attr = curses.A_BOLD if "BlurMyCLI" in line else 0
-        x = max(0, (cols - len(line)) // 2)
-        stdscr.addstr(start + i, x, line, attr)
+    box_w = min(50, cols - 4)
+    box_h = 9
+    bx = (cols - box_w) // 2
+    by = (rows - box_h) // 2 - 2
+
+    draw_box(stdscr, by, bx, box_h, box_w)
+
+    title = f" {TITLE} "
+    ver = f" {VERSION} "
+    sub = " a CLI-focused Hyprland dotfile setup "
+    prompt = " Press SPACE / ENTER to begin "
+    quit_ = " Press ESC / Q to quit "
+
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+    cx = (cols - len(ver)) // 2
+    stdscr.addstr(by + 2, cx, ver, THEME["accent"])
+    cx = (cols - len(sub)) // 2
+    stdscr.addstr(by + 4, cx, sub, THEME["dim"])
+    cx = (cols - len(prompt)) // 2
+    stdscr.addstr(by + 6, cx, prompt, THEME["success"])
+    cx = (cols - len(quit_)) // 2
+    stdscr.addstr(by + 7, cx, quit_, THEME["error"])
 
     curses.curs_set(0)
     stdscr.refresh()
@@ -137,7 +214,7 @@ def screen_welcome(stdscr):
     while True:
         key = stdscr.getch()
         if key == curses.KEY_RESIZE:
-            continue
+            return screen_welcome(stdscr)
         if key in (10, 13, 32):
             return True
         if key in (27, ord("q"), ord("Q")):
@@ -148,22 +225,31 @@ def screen_os_check(stdscr, state: InstallState):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
 
-    y = 3
-    stdscr.addstr(y, 2, "OS Detection", curses.A_BOLD)
-    y += 1
-    sep = min(40, cols - 4)
-    stdscr.addstr(y, 2, "\u2500" * sep, curses.A_DIM)
-    y += 2
-    stdscr.addstr(y, 2, f"  Detected: {state.os_name}")
-    y += 1
-    if state.is_arch:
-        stdscr.addstr(y, 2, "  Good, Arch Linux detected.", curses.A_BOLD)
-    else:
-        stdscr.addstr(y, 2, f"  Warning: {state.os_name} may not be fully compatible.", curses.A_BOLD)
-        y += 1
-        stdscr.addstr(y, 2, "  Things may not work out of the box.", curses.A_DIM)
+    box_w = min(44, cols - 4)
+    box_h = 6
+    bx = (cols - box_w) // 2
+    by = (rows - box_h) // 2
 
-    draw_footer(stdscr, "Press SPACE / ENTER to continue...")
+    draw_box(stdscr, by, bx, box_h, box_w)
+
+    title = " OS Detection "
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+
+    os_txt = f" Detected: {state.os_name} "
+    cx = (cols - len(os_txt)) // 2
+    stdscr.addstr(by + 3, cx, os_txt, THEME["accent"])
+
+    if state.is_arch:
+        msg = " Arch Linux detected "
+        a = THEME["success"]
+    else:
+        msg = f" {state.os_name} may not be fully compatible "
+        a = THEME["error"]
+    cx = (cols - len(msg)) // 2
+    stdscr.addstr(by + 4, cx, msg, a)
+
+    draw_footer(stdscr, "SPACE / ENTER to continue")
     curses.curs_set(0)
     stdscr.refresh()
     await_key(stdscr)
@@ -173,38 +259,36 @@ def screen_kb_layout_prompt(stdscr, state: InstallState):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
 
-    lines = [
-        "",
-        "   Keyboard Layout   ",
-        "",
-        "   Enter your keyboard layout code",
-        "   (e.g. us, de, fr, gb, jp, etc.)",
-        "",
-    ]
-    start = max(2, (rows - len(lines) - 5) // 2)
-    for i, line in enumerate(lines):
-        attr = curses.A_BOLD if "Keyboard" in line else 0
-        x = max(0, (cols - len(line)) // 2)
-        stdscr.addstr(start + i, x, line, attr)
+    box_w = min(46, cols - 4)
+    box_h = 7
+    bx = (cols - box_w) // 2
+    by = (rows - box_h) // 2
+
+    draw_box(stdscr, by, bx, box_h, box_w)
+
+    title = " Keyboard Layout "
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+
+    hint = " enter layout code (us, de, fr, gb, jp...) "
+    cx = (cols - len(hint)) // 2
+    stdscr.addstr(by + 3, cx, hint, THEME["dim"])
 
     path = state.kb_layout
-    y = start + len(lines)
-    sep = min(40, cols - 4)
-    stdscr.addstr(y, 2, "\u2500" * sep, curses.A_DIM)
-    y += 2
-
+    y = by + 5
     curses.curs_set(1)
 
     while True:
-        stdscr.addstr(y, 2, "  " + " " * max(cols - 4, 1))
-        stdscr.addstr(y, 2, f"  Layout: {path}")
-        stdscr.move(y, 10 + len(path))
+        stdscr.addstr(y, bx + 2, " " * (box_w - 4))
+        display = f"> {path} "
+        stdscr.addstr(y, bx + 2, display, THEME["accent"])
+        stdscr.move(y, bx + 4 + len(path))
         stdscr.refresh()
 
         key = stdscr.getch()
         if key == curses.KEY_RESIZE:
             rows, cols = stdscr.getmaxyx()
-            continue
+            return screen_kb_layout_prompt(stdscr, state)
         if key in (10, 13):
             break
         elif key in (27, ord("q"), ord("Q")):
@@ -228,43 +312,43 @@ def screen_dep_check(stdscr, state: InstallState):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
 
-    y = 3
-    stdscr.addstr(y, 2, "Dependency Check", curses.A_BOLD)
-    y += 1
-    sep = min(40, cols - 4)
-    stdscr.addstr(y, 2, "\u2500" * sep, curses.A_DIM)
-    y += 2
+    box_w = min(42, cols - 4)
+    bx = (cols - box_w) // 2
+    by = 2
 
     scroll = 0
-    max_visible = rows - y - 3
+    max_visible = rows - by - 5
 
     while True:
         stdscr.erase()
-        y = 3
-        stdscr.addstr(y, 2, "Dependency Check", curses.A_BOLD)
-        y += 1
-        stdscr.addstr(y, 2, "\u2500" * min(40, cols - 4), curses.A_DIM)
-        y += 2
+        rows, cols = stdscr.getmaxyx()
+        box_w = min(42, cols - 4)
+        bx = (cols - box_w) // 2
+        max_visible = rows - by - 5
+
+        draw_box(stdscr, by, bx, min(max_visible + 3, len(state.dep_results) + 3), box_w)
+
+        title = " Dependency Check "
+        cx = (cols - len(title)) // 2
+        stdscr.addstr(by + 1, cx, title, THEME["highlight"])
 
         visible = state.dep_results[scroll:scroll + max_visible]
         for i, (name, found) in enumerate(visible):
             icon = "\u2713" if found else "\u2717"
-            icon_attr = curses.color_pair(2) if found else curses.color_pair(1)
-            label = f"  {icon}  {name}"
-            stdscr.addstr(y + i, 2, label, icon_attr)
+            icon_attr = THEME["success"] if found else THEME["error"]
+            label = f" {icon} {name} "
+            stdscr.addstr(by + 3 + i, bx + 2, label, icon_attr)
 
         total = len(state.dep_results)
         if total > max_visible:
-            pct = f"  [{scroll + 1}-{min(scroll + max_visible, total)}/{total}]"
-            stdscr.addstr(rows - 2, cols - len(pct) - 2, pct, curses.A_DIM)
+            pct = f" [{scroll + 1}-{min(scroll + max_visible, total)}/{total}] "
+            stdscr.addstr(rows - 3, cols - len(pct) - 2, pct, THEME["dim"])
 
-        draw_footer(stdscr, "\u2191\u2195 scroll  Press SPACE / ENTER to continue...")
+        draw_footer(stdscr, "\u2191\u2195 scroll  SPACE / ENTER to continue")
         stdscr.refresh()
 
         key = stdscr.getch()
         if key == curses.KEY_RESIZE:
-            rows, cols = stdscr.getmaxyx()
-            max_visible = rows - 6
             continue
         if key == curses.KEY_UP and scroll > 0:
             scroll -= 1
@@ -281,38 +365,40 @@ def screen_blur_prompt(stdscr, state: InstallState):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
 
-    lines = [
-        "",
-        "   Blur Configuration   ",
-        "",
-        "   Enable blur effects in Hyprland?",
-        "   (adds glass-like transparency to windows)",
-        "",
-    ]
-    start = max(2, (rows - len(lines) - 4) // 2)
-    for i, line in enumerate(lines):
-        attr = curses.A_BOLD if "Blur Configuration" in line else 0
-        x = max(0, (cols - len(line)) // 2)
-        stdscr.addstr(start + i, x, line, attr)
+    box_w = min(48, cols - 4)
+    box_h = 8
+    bx = (cols - box_w) // 2
+    by = (rows - box_h) // 2
+
+    draw_box(stdscr, by, bx, box_h, box_w)
+
+    title = " Blur Configuration "
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+
+    desc = " enable glass-like transparency? "
+    cx = (cols - len(desc)) // 2
+    stdscr.addstr(by + 3, cx, desc, THEME["dim"])
 
     choice = state.blur
     while True:
-        y = start + len(lines)
-        yes_attr = curses.A_REVERSE if choice else 0
-        no_attr = curses.A_REVERSE if not choice else 0
-        sep = min(30, cols - 4)
-        stdscr.addstr(y, 2, "\u2500" * sep, curses.A_DIM)
-        y += 1
-        stdscr.addstr(y, 4, "[Y]  Yes  ", yes_attr)
-        stdscr.addstr(y, 14, "[N]  No  ", no_attr)
+        y = by + 5
+        yes_attr = THEME["success"] | curses.A_REVERSE if choice else THEME["success"]
+        no_attr = THEME["error"] | curses.A_REVERSE if not choice else THEME["error"]
+        stdscr.addstr(y, bx + 6, " [Y]  Yes  ", yes_attr)
+        stdscr.addstr(y, bx + 20, " [N]  No  ", no_attr)
         stdscr.refresh()
 
         key = stdscr.getch()
         if key == curses.KEY_RESIZE:
-            continue
-        if key in (ord("y"), ord("Y"), curses.KEY_LEFT):
+            return screen_blur_prompt(stdscr, state)
+        if key in (ord("y"), ord("Y")):
             choice = True
-        elif key in (ord("n"), ord("N"), curses.KEY_RIGHT):
+        elif key in (ord("n"), ord("N")):
+            choice = False
+        elif key == curses.KEY_LEFT:
+            choice = True
+        elif key == curses.KEY_RIGHT:
             choice = False
         elif key in (10, 13, 32):
             state.blur = choice
@@ -326,39 +412,43 @@ def screen_rec_utils_prompt(stdscr, state: InstallState):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
 
-    lines = [
-        "",
-        "   Recommended Utilities   ",
-        "",
-        "   Install CLI tools + eightfetch?",
-        "   (cli-menu, cli-search, cli-launch,",
-        "    rapidfuzz, eightfetch)",
-        "",
-    ]
-    start = max(2, (rows - len(lines) - 4) // 2)
-    for i, line in enumerate(lines):
-        attr = curses.A_BOLD if "Recommended Utilities" in line else 0
-        x = max(0, (cols - len(line)) // 2)
-        stdscr.addstr(start + i, x, line, attr)
+    box_w = min(52, cols - 4)
+    box_h = 9
+    bx = (cols - box_w) // 2
+    by = (rows - box_h) // 2
+
+    draw_box(stdscr, by, bx, box_h, box_w)
+
+    title = " Recommended Utilities "
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+
+    desc = " install CLI tools + eightfetch? "
+    cx = (cols - len(desc)) // 2
+    stdscr.addstr(by + 3, cx, desc, THEME["dim"])
+    desc2 = " (cli-menu, cli-search, cli-launch) "
+    cx = (cols - len(desc2)) // 2
+    stdscr.addstr(by + 4, cx, desc2, THEME["dim"])
 
     choice = state.rec_utils
     while True:
-        y = start + len(lines)
-        sep = min(30, cols - 4)
-        stdscr.addstr(y, 2, "\u2500" * sep, curses.A_DIM)
-        y += 1
-        yes_attr = curses.A_REVERSE if choice else 0
-        no_attr = curses.A_REVERSE if not choice else 0
-        stdscr.addstr(y, 4, "[Y]  Yes  ", yes_attr)
-        stdscr.addstr(y, 14, "[N]  No  ", no_attr)
+        y = by + 6
+        yes_attr = THEME["success"] | curses.A_REVERSE if choice else THEME["success"]
+        no_attr = THEME["error"] | curses.A_REVERSE if not choice else THEME["error"]
+        stdscr.addstr(y, bx + 6, " [Y]  Yes  ", yes_attr)
+        stdscr.addstr(y, bx + 20, " [N]  No  ", no_attr)
         stdscr.refresh()
 
         key = stdscr.getch()
         if key == curses.KEY_RESIZE:
-            continue
-        if key in (ord("y"), ord("Y"), curses.KEY_LEFT):
+            return screen_rec_utils_prompt(stdscr, state)
+        if key in (ord("y"), ord("Y")):
             choice = True
-        elif key in (ord("n"), ord("N"), curses.KEY_RIGHT):
+        elif key in (ord("n"), ord("N")):
+            choice = False
+        elif key == curses.KEY_LEFT:
+            choice = True
+        elif key == curses.KEY_RIGHT:
             choice = False
         elif key in (10, 13, 32):
             state.rec_utils = choice
@@ -372,50 +462,48 @@ def screen_wallpaper_prompt(stdscr, state: InstallState):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
 
-    lines = [
-        "",
-        "   Wallpaper Setup   ",
-        "",
-        "   Enter path to a wallpaper image, or",
-        "   leave empty and press ENTER to skip.",
-        "",
-    ]
-    start = max(2, (rows - len(lines) - 5) // 2)
-    for i, line in enumerate(lines):
-        attr = curses.A_BOLD if "Wallpaper" in line else 0
-        x = max(0, (cols - len(line)) // 2)
-        stdscr.addstr(start + i, x, line, attr)
+    box_w = min(52, cols - 4)
+    box_h = 8
+    bx = (cols - box_w) // 2
+    by = (rows - box_h) // 2
+
+    draw_box(stdscr, by, bx, box_h, box_w)
+
+    title = " Wallpaper Setup "
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+
+    hint = " enter path to image, or leave empty "
+    cx = (cols - len(hint)) // 2
+    stdscr.addstr(by + 3, cx, hint, THEME["dim"])
 
     path = ""
-    y = start + len(lines)
-    sep = min(40, cols - 4)
-    stdscr.addstr(y, 2, "\u2500" * sep, curses.A_DIM)
-    y += 2
-
-    curses.curs_set(1)
+    y = by + 5
     IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+    curses.curs_set(1)
 
     while True:
-        stdscr.addstr(y, 2, "  " + " " * max(cols - 4, 1))
-        stdscr.addstr(y, 2, f"  Path: {path}")
-        help_y = y + 1
-        stdscr.addstr(help_y, 2, "  " + " " * max(cols - 4, 1))
+        stdscr.addstr(y, bx + 2, " " * (box_w - 4))
+        display = f"> {path} "
+        stdscr.addstr(y, bx + 2, display, THEME["accent"])
 
         trimmed = path.strip()
         if trimmed:
             p = Path(trimmed).expanduser()
             if not p.exists():
-                stdscr.addstr(help_y, 2, "  File not found. Press ENTER to skip or fix the path.", curses.color_pair(1))
+                err = " file not found "
+                stdscr.addstr(by + 6, bx + 2, err, THEME["error"])
             elif p.suffix.lower() not in IMAGE_EXTS:
-                stdscr.addstr(help_y, 2, "  Unsupported format (use png/jpg/webp/bmp). Press ENTER to skip.", curses.color_pair(1))
+                err = " unsupported format (png/jpg/webp/bmp) "
+                stdscr.addstr(by + 6, bx + 2, err, THEME["error"])
 
-        stdscr.move(y, 8 + len(path))
+        stdscr.move(y, bx + 4 + len(path))
         stdscr.refresh()
 
         key = stdscr.getch()
         if key == curses.KEY_RESIZE:
-            rows, cols = stdscr.getmaxyx()
-            continue
+            curses.curs_set(0)
+            return screen_wallpaper_prompt(stdscr, state)
         if key in (10, 13):
             break
         elif key in (27, ord("q"), ord("Q")):
@@ -436,31 +524,131 @@ def screen_wallpaper_prompt(stdscr, state: InstallState):
     return True
 
 
+def screen_terminal_prompt(stdscr, state: InstallState) -> bool:
+    stdscr.erase()
+    rows, cols = stdscr.getmaxyx()
+
+    box_w = min(56, cols - 4)
+    box_h = 9
+    bx = (cols - box_w) // 2
+    by = (rows - box_h) // 2
+
+    draw_box(stdscr, by, bx, box_h, box_w)
+
+    title = " Terminal Emulator "
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+
+    options = [
+        ("kitty", "Kitty", "GPU-accelerated, feature-rich"),
+        ("alacritty", "Alacritty", "GPU-accelerated, minimal"),
+    ]
+    choice_idx = 0 if state.terminal_choice == "kitty" else 1
+
+    while True:
+        y = by + 3
+        for i, (val, label, desc) in enumerate(options):
+            if i == choice_idx:
+                attr = THEME["highlight"] | curses.A_REVERSE
+                marker = "\u25b6 "
+            else:
+                attr = THEME["dim"]
+                marker = "  "
+            stdscr.addstr(y, bx + 4, f" {marker}{label} ", attr)
+            stdscr.addstr(y, bx + 18, f" {desc} ", THEME["dim"])
+            y += 1
+
+        draw_footer(stdscr, "\u2191\u2195 select  SPACE / ENTER to confirm")
+        stdscr.refresh()
+
+        key = stdscr.getch()
+        if key == curses.KEY_RESIZE:
+            return screen_terminal_prompt(stdscr, state)
+        if key == curses.KEY_UP and choice_idx > 0:
+            choice_idx -= 1
+        elif key == curses.KEY_DOWN and choice_idx < len(options) - 1:
+            choice_idx += 1
+        elif key in (10, 13, 32):
+            state.terminal_choice = options[choice_idx][0]
+            break
+        elif key in (27, ord("q"), ord("Q")):
+            return False
+    return True
+
+
+def screen_bindings_prompt(stdscr, state: InstallState) -> bool:
+    stdscr.erase()
+    rows, cols = stdscr.getmaxyx()
+
+    box_w = min(58, cols - 4)
+    box_h = 10
+    bx = (cols - box_w) // 2
+    by = (rows - box_h) // 2
+
+    draw_box(stdscr, by, bx, box_h, box_w)
+
+    title = " Keybindings "
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+
+    options = [
+        ("my_binds", "My Binds", "Full set (SUPER+S, Q, M, arrows...)"),
+        ("basic", "Basic Binds", "Essentials (kill, exit, menu, term)"),
+    ]
+    choice_idx = 0 if state.kb_mode == "my_binds" else 1
+
+    while True:
+        y = by + 3
+        for i, (val, label, desc) in enumerate(options):
+            if i == choice_idx:
+                attr = THEME["highlight"] | curses.A_REVERSE
+                marker = "\u25b6 "
+            else:
+                attr = THEME["dim"]
+                marker = "  "
+            stdscr.addstr(y, bx + 4, f" {marker}{label} ", attr)
+            stdscr.addstr(y, bx + 20, f" {desc} ", THEME["dim"])
+            y += 1
+
+        draw_footer(stdscr, "\u2191\u2195 select  SPACE / ENTER to confirm")
+        stdscr.refresh()
+
+        key = stdscr.getch()
+        if key == curses.KEY_RESIZE:
+            return screen_bindings_prompt(stdscr, state)
+        if key == curses.KEY_UP and choice_idx > 0:
+            choice_idx -= 1
+        elif key == curses.KEY_DOWN and choice_idx < len(options) - 1:
+            choice_idx += 1
+        elif key in (10, 13, 32):
+            state.kb_mode = options[choice_idx][0]
+            break
+        elif key in (27, ord("q"), ord("Q")):
+            return False
+    return True
+
+
 def screen_existing_configs(stdscr, state: InstallState):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
 
-    y = 3
-    stdscr.addstr(y, 2, "Existing Configurations", curses.A_BOLD)
-    y += 1
-    sep = min(40, cols - 4)
-    stdscr.addstr(y, 2, "\u2500" * sep, curses.A_DIM)
-    y += 2
+    by = 2
+    box_w = min(50, cols - 4)
 
     if not state.existing_dirs:
-        stdscr.addstr(y, 2, "  No existing configs found. Fresh install!")
-        draw_footer(stdscr, "Press SPACE / ENTER to continue...")
+        bx = (cols - min(44, box_w)) // 2
+        box_h = 4
+        draw_box(stdscr, by, bx, box_h, min(44, box_w))
+        title = " Existing Configurations "
+        cx = (cols - len(title)) // 2
+        stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+        msg = " no existing configs found — fresh install! "
+        cx = (cols - len(msg)) // 2
+        stdscr.addstr(by + 2, cx, msg, THEME["success"])
+        draw_footer(stdscr, "SPACE / ENTER to continue")
         stdscr.refresh()
         await_key(stdscr)
         return True
-
-    for name in state.existing_dirs:
-        stdscr.addstr(y, 2, f"  Found: ~/.config/{name}/")
-        y += 1
-
-    y += 1
-    stdscr.addstr(y, 2, "  How to handle existing files?")
-    y += 1
 
     options = [
         ("B", "Backup + Overwrite", "bak"),
@@ -476,24 +664,40 @@ def screen_existing_configs(stdscr, state: InstallState):
 
     while True:
         stdscr.erase()
-        y = 3
-        stdscr.addstr(y, 2, "Existing Configurations", curses.A_BOLD)
-        y += 1
-        stdscr.addstr(y, 2, "\u2500" * min(40, cols - 4), curses.A_DIM)
-        y += 2
+        rows, cols = stdscr.getmaxyx()
+        box_w = min(50, cols - 4)
+        content_h = 2 + len(state.existing_dirs) + 2 + len(options) + 1
+        box_h = content_h + 2
+        bx = (cols - box_w) // 2
+        by = max(1, (rows - box_h) // 2)
+
+        draw_box(stdscr, by, bx, box_h, box_w)
+
+        title = " Existing Configurations "
+        cx = (cols - len(title)) // 2
+        stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+
+        y = by + 3
         for name in state.existing_dirs:
-            stdscr.addstr(y, 2, f"  Found: ~/.config/{name}/")
+            line = f" found: ~/.config/{name}/ "
+            stdscr.addstr(y, bx + 3, line, THEME["accent"])
             y += 1
+
         y += 1
-        stdscr.addstr(y, 2, "  How to handle existing files?")
+        handler_txt = " how to handle existing files? "
+        cx = (cols - len(handler_txt)) // 2
+        stdscr.addstr(y, cx, handler_txt, THEME["dim"])
         y += 1
 
         for i, (key, label, _) in enumerate(options):
-            attr = curses.A_REVERSE if i == choice_idx else 0
-            stdscr.addstr(y, 4, f"[{key}]  {label}", attr)
+            if i == choice_idx:
+                attr = THEME["highlight"] | curses.A_REVERSE
+            else:
+                attr = THEME["dim"]
+            stdscr.addstr(y, bx + 6, f" [{key}]  {label} ", attr)
             y += 1
 
-        draw_footer(stdscr, "\u2191\u2195  Select  SPACE / ENTER to confirm")
+        draw_footer(stdscr, "\u2191\u2195 select  SPACE / ENTER to confirm")
         stdscr.refresh()
 
         key = stdscr.getch()
@@ -518,52 +722,56 @@ def screen_summary(stdscr, state: InstallState):
     missing = [n for n, f in state.dep_results if not f]
     blur_text = "enabled" if state.blur else "disabled"
     rec_text = "yes" if state.rec_utils else "no"
-
     action_labels = {"bak": "backup + overwrite", "overwrite": "overwrite", "skip": "skip"}
     config_text = action_labels.get(state.config_action, state.config_action)
     wall_text = state.wallpaper_path if state.wallpaper_path else "none"
 
-    lines = [
-        "",
-        "   Installation Summary   ",
-        "",
-        f"   OS:           {state.os_name}",
-        f"   Keyboard:     {state.kb_layout}",
-        f"   Missing:      {', '.join(missing) if missing else 'none'}",
-        f"   Blur:         {blur_text}",
-        f"   Rec utils:    {rec_text}",
-        f"   Wallpaper:    {wall_text}",
-        f"   Existing:     {config_text}",
-        "",
+    items = [
+        ("OS", state.os_name),
+        ("Keyboard", state.kb_layout),
+        ("Missing", ', '.join(missing) if missing else 'none'),
+        ("Blur", blur_text),
+        ("Rec utils", rec_text),
+        ("Terminal", state.terminal_choice),
+        ("Bindings", 'My Binds' if state.kb_mode == 'my_binds' else 'Basic Binds'),
+        ("Wallpaper", wall_text),
+        ("Existing", config_text),
     ]
 
-    start = max(2, (rows - len(lines) - 4) // 2)
-    for i, line in enumerate(lines):
-        attr = curses.A_BOLD if "Summary" in line else 0
-        x = max(0, (cols - len(line)) // 2)
-        stdscr.addstr(start + i, x, line, attr)
+    box_w = min(50, cols - 4)
+    content_h = 3 + len(items) + 3
+    box_h = content_h + 2
+    bx = (cols - box_w) // 2
+    by = max(1, (rows - box_h) // 2)
 
-    sep = min(40, cols - 4)
+    draw_box(stdscr, by, bx, box_h, box_w)
 
+    title = " Installation Summary "
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+
+    y = by + 3
+    for label, value in items:
+        line = f" {label}: ".ljust(15)
+        stdscr.addstr(y, bx + 3, line, THEME["dim"])
+        stdscr.addstr(y, bx + 3 + 15, value, THEME["accent"])
+        y += 1
+
+    y += 1
     choice = True
     while True:
-        y = start + len(lines) + 1
-        stdscr.addstr(y, 2, "\u2500" * sep, curses.A_DIM)
-        y += 1
-        stdscr.addstr(y, 4, "  Does this look right?  ", curses.A_BOLD)
-        y += 1
-        yes_attr = curses.A_REVERSE if choice else 0
-        no_attr = curses.A_REVERSE if not choice else 0
-        stdscr.addstr(y, 4, "[Y]  Yes, install!  ", yes_attr)
-        stdscr.addstr(y, 24, "[N]  No, cancel  ", no_attr)
+        yes_attr = THEME["success"] | curses.A_REVERSE if choice else THEME["success"]
+        no_attr = THEME["error"] | curses.A_REVERSE if not choice else THEME["error"]
+        stdscr.addstr(y, bx + 4, " [Y]  Yes, install!  ", yes_attr)
+        stdscr.addstr(y, bx + 26, " [N]  No, cancel  ", no_attr)
         stdscr.refresh()
 
         key = stdscr.getch()
         if key == curses.KEY_RESIZE:
-            continue
-        if key in (ord("y"), ord("Y"), curses.KEY_LEFT):
+            return screen_summary(stdscr, state)
+        if key in (ord("y"), ord("Y")):
             choice = True
-        elif key in (ord("n"), ord("N"), curses.KEY_RIGHT):
+        elif key in (ord("n"), ord("N")):
             choice = False
         elif key in (10, 13, 32):
             state.confirmed = choice
@@ -582,34 +790,60 @@ def screen_installing(stdscr, state: InstallState):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
 
-    lines = [
-        "",
-        "   Installing...   ",
-        "",
-    ]
-    start = 3
-    for i, line in enumerate(lines):
-        attr = curses.A_BOLD if "Installing" in line else 0
-        x = max(0, (cols - len(line)) // 2)
-        stdscr.addstr(start + i, x, line, attr)
+    box_w = min(50, cols - 4)
+    bx = (cols - box_w) // 2
+    by = 1
 
-    log_y = start + len(lines) + 1
     log = []
+    log_y = by + 2
 
     def log_msg(msg, ok=True):
         nonlocal log_y
         icon = "\u2713" if ok else "\u2717"
-        attr = curses.color_pair(2) if ok else curses.color_pair(1)
-        stdscr.addstr(log_y, 2, f"  {icon}  {msg}", attr)
+        icon_attr = THEME["success"] if ok else THEME["error"]
+        label = f" {icon} {msg} "
+        stdscr.addstr(log_y, bx + 2, label, icon_attr)
         log_y += 1
         stdscr.refresh()
 
+    stdscr.erase()
+    rows, cols = stdscr.getmaxyx()
+    box_w = min(50, cols - 4)
+    bx = (cols - box_w) // 2
+    by = 1
+
+    draw_box(stdscr, by, bx, 3, box_w)
+    title = " Installing... "
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
     stdscr.refresh()
 
+    BASIC_BINDS = """# binds
+bind = $mainMod, Q, killactive,
+bind = $mainMod, C, exec, command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch exit
+bind = $mainMod, M, exec, __TERMINAL__ --class cli-menu --title cli-menu -e $menu
+bind = $mainMod, S, exec, $terminal
+bind = $mainMod, E, exec, $fileManager
+bind = $mainMod, Space, exec, __TERMINAL__ --class cli-launch --title cli-launch -e $appLauncher
+bind = $mainMod, V, togglefloating,
+bindm = $mainMod, mouse:272, movewindow
+bindm = $mainMod, mouse:273, resizewindow
+bind = $mainMod, left, movefocus, l
+bind = $mainMod, right, movefocus, r
+bind = $mainMod, up, movefocus, u
+bind = $mainMod, down, movefocus, d
+bind = $mainMod SHIFT, left, movewindow, l
+bind = $mainMod SHIFT, right, movewindow, r
+bind = $mainMod SHIFT, up, movewindow, u
+bind = $mainMod SHIFT, down, movewindow, d
+"""
+
     try:
+        term_subdir = state.terminal_choice
+        term_file = "kitty.conf" if state.terminal_choice == "kitty" else "alacritty.toml"
         config_mapping = [
             ("hypr",    "hyprland.conf"),
-            ("kitty",   "kitty.conf"),
+            (term_subdir, term_file),
             ("fish",    "config.fish"),
             ("opencode","opencode.jsonc"),
             ("opencode","tui.json"),
@@ -644,9 +878,16 @@ def screen_installing(stdscr, state: InstallState):
                 "__CLI_SEARCH_PATH__": f"{LOCAL_BIN}/cli-search.py",
                 "__CLI_MENU_PATH__":   f"{LOCAL_BIN}/cli-menu.py",
                 "__KB_LAYOUT__":       state.kb_layout,
+                "__TERMINAL__":        state.terminal_choice,
             }
             for old, new in replacements.items():
                 content = content.replace(old, new)
+
+            if state.kb_mode == "basic":
+                binds_start = content.find("# binds\n")
+                anim_start = content.find("\n# animation")
+                if binds_start != -1 and anim_start != -1:
+                    content = content[:binds_start] + BASIC_BINDS + content[anim_start:]
 
             if not state.blur:
                 content = content.replace("enabled = true", "enabled = false")
@@ -659,7 +900,14 @@ def screen_installing(stdscr, state: InstallState):
                     )
 
             hypr_conf.write_text(content)
-            log_msg("Patched hyprland.conf (paths + blur setting)")
+            log_msg("Patched hyprland.conf (paths, terminal, binds)")
+
+        cli_menu_dst = LOCAL_BIN / "cli-menu.py" if state.rec_utils else None
+        if cli_menu_dst and cli_menu_dst.exists():
+            menu_content = cli_menu_dst.read_text()
+            menu_content = menu_content.replace("__TERMINAL__", state.terminal_choice)
+            cli_menu_dst.write_text(menu_content)
+            log_msg("Patched cli-menu.py terminal references")
 
         if state.wallpaper_path:
             hp_cfg = XDG_CONFIG / "hypr" / "hyprpaper.conf"
@@ -710,9 +958,14 @@ def screen_installing(stdscr, state: InstallState):
         log_msg(f"Error: {e}", False)
 
     log_y += 1
-    stdscr.addstr(log_y, 2, "  Done! Press SPACE / ENTER to exit.", curses.A_BOLD)
+    done_msg = " Done! Press SPACE / ENTER to exit. "
+    cx = (cols - len(done_msg)) // 2
+    stdscr.addstr(log_y, cx, done_msg, THEME["success"] | curses.A_BOLD)
     log_y += 1
-    stdscr.addstr(log_y, 2, "  Hint: quit Hyprland (SUPER + M) and login again to apply changes.", curses.A_DIM)
+    quit_hint = "SUPER + M" if state.kb_mode == "my_binds" else "SUPER + C"
+    hint_msg = f" Hint: quit Hyprland ({quit_hint}) and login again to apply changes. "
+    cx = (cols - len(hint_msg)) // 2
+    stdscr.addstr(log_y, cx, hint_msg, THEME["dim"])
     stdscr.refresh()
     await_key(stdscr)
     return True
@@ -722,19 +975,21 @@ def screen_cancelled(stdscr):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
 
-    lines = [
-        "",
-        "   Installation cancelled.   ",
-        "   No changes were made.   ",
-        "",
-        "   Press SPACE / ENTER to exit.   ",
-    ]
-    start = max(2, (rows - len(lines)) // 2)
-    for i, line in enumerate(lines):
-        x = max(0, (cols - len(line)) // 2)
-        stdscr.addstr(start + i, x, line)
+    box_w = min(44, cols - 4)
+    box_h = 5
+    bx = (cols - box_w) // 2
+    by = (rows - box_h) // 2
 
-    draw_footer(stdscr, "")
+    draw_box(stdscr, by, bx, box_h, box_w)
+
+    msg = " Installation cancelled. No changes made. "
+    cx = (cols - len(msg)) // 2
+    stdscr.addstr(by + 2, cx, msg, THEME["error"])
+
+    ex = " Press SPACE / ENTER to exit "
+    cx = (cols - len(ex)) // 2
+    stdscr.addstr(by + 3, cx, ex, THEME["dim"])
+
     curses.curs_set(0)
     stdscr.refresh()
     await_key(stdscr)
@@ -742,10 +997,7 @@ def screen_cancelled(stdscr):
 
 def main(stdscr):
     curses.curs_set(0)
-    curses.use_default_colors()
-    if curses.has_colors():
-        curses.init_pair(1, curses.COLOR_RED, -1)
-        curses.init_pair(2, curses.COLOR_GREEN, -1)
+    init_theme()
 
     state = InstallState()
 
@@ -772,6 +1024,14 @@ def main(stdscr):
         return
 
     if not screen_rec_utils_prompt(stdscr, state):
+        screen_cancelled(stdscr)
+        return
+
+    if not screen_terminal_prompt(stdscr, state):
+        screen_cancelled(stdscr)
+        return
+
+    if not screen_bindings_prompt(stdscr, state):
         screen_cancelled(stdscr)
         return
 

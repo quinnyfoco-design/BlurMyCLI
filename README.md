@@ -35,7 +35,7 @@ the installer will:
 #
 ## binds
 
-> This uses my binds, but if you want to configurate you can in hyprland.conf
+> This is my binds, but if you chose the basic keybinds you can use Super+Q to open a terminal and config your own binds.
 
 open kitty = Super+S
 kill window = Super+Q
