@@ -30,3 +30,26 @@ the installer will:
 - handle existing configs (backup, overwrite, or skip)
 - show a summary before making any changes
 - copy configs to `~/.config/`, install utils to `~/.local/bin/`
+- add .cargo to your path
+
+#
+## binds
+
+> This uses my binds, but if you want to configurate you can in hyprland.conf
+
+open kitty = Super+S
+kill window = Super+Q
+logout of hyprland = Super+M
+open dolphin = Super+E
+toggle floating = Super+V
+CLI applauncher = Super+Space
+Browser = Super+Y
+CLI quick search = Super+Shift+Space
+CLI menu = Super+Alt+Space
+Move windows(with mouse) = Super+LMB
+Resize windows = Super+RMB
+Move focus = Super+arrows OR hjkl
+Move windows(with keys) = Super+Shift+arrows OR hjkl
+Hide window = Super+N
+Show hidden window(covers tiled windows) = Super+B
+Tile hidden window(if hidden window is focused on) = Super+Shift+B

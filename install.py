@@ -44,6 +44,7 @@ class InstallState:
         self.rec_utils = True
         self.config_action = "bak"
         self.existing_dirs: list[str] = []
+        self.kb_layout = "us"
         self.wallpaper_path = ""
         self.confirmed = False
 
@@ -166,6 +167,61 @@ def screen_os_check(stdscr, state: InstallState):
     curses.curs_set(0)
     stdscr.refresh()
     await_key(stdscr)
+
+
+def screen_kb_layout_prompt(stdscr, state: InstallState):
+    stdscr.erase()
+    rows, cols = stdscr.getmaxyx()
+
+    lines = [
+        "",
+        "   Keyboard Layout   ",
+        "",
+        "   Enter your keyboard layout code",
+        "   (e.g. us, de, fr, gb, jp, etc.)",
+        "",
+    ]
+    start = max(2, (rows - len(lines) - 5) // 2)
+    for i, line in enumerate(lines):
+        attr = curses.A_BOLD if "Keyboard" in line else 0
+        x = max(0, (cols - len(line)) // 2)
+        stdscr.addstr(start + i, x, line, attr)
+
+    path = state.kb_layout
+    y = start + len(lines)
+    sep = min(40, cols - 4)
+    stdscr.addstr(y, 2, "\u2500" * sep, curses.A_DIM)
+    y += 2
+
+    curses.curs_set(1)
+
+    while True:
+        stdscr.addstr(y, 2, "  " + " " * max(cols - 4, 1))
+        stdscr.addstr(y, 2, f"  Layout: {path}")
+        stdscr.move(y, 10 + len(path))
+        stdscr.refresh()
+
+        key = stdscr.getch()
+        if key == curses.KEY_RESIZE:
+            rows, cols = stdscr.getmaxyx()
+            continue
+        if key in (10, 13):
+            break
+        elif key in (27, ord("q"), ord("Q")):
+            curses.curs_set(0)
+            return False
+        elif key in (curses.KEY_BACKSPACE, 127, 8):
+            path = path[:-1]
+        elif 32 <= key <= 126:
+            if len(path) < 10:
+                path += chr(key)
+
+    trimmed = path.strip().lower()
+    if trimmed:
+        state.kb_layout = trimmed
+
+    curses.curs_set(0)
+    return True
 
 
 def screen_dep_check(stdscr, state: InstallState):
@@ -472,6 +528,7 @@ def screen_summary(stdscr, state: InstallState):
         "   Installation Summary   ",
         "",
         f"   OS:           {state.os_name}",
+        f"   Keyboard:     {state.kb_layout}",
         f"   Missing:      {', '.join(missing) if missing else 'none'}",
         f"   Blur:         {blur_text}",
         f"   Rec utils:    {rec_text}",
@@ -586,6 +643,7 @@ def screen_installing(stdscr, state: InstallState):
                 "__CLI_LAUNCH_PATH__": f"{LOCAL_BIN}/cli-launch.py",
                 "__CLI_SEARCH_PATH__": f"{LOCAL_BIN}/cli-search.py",
                 "__CLI_MENU_PATH__":   f"{LOCAL_BIN}/cli-menu.py",
+                "__KB_LAYOUT__":       state.kb_layout,
             }
             for old, new in replacements.items():
                 content = content.replace(old, new)
@@ -637,6 +695,15 @@ def screen_installing(stdscr, state: InstallState):
                 log_msg("Installed eightfetch", r == 0)
             else:
                 log_msg("cargo not found, skipping eightfetch", False)
+
+            fish_cfg = XDG_CONFIG / "fish" / "config.fish"
+            if fish_cfg.exists():
+                content = fish_cfg.read_text()
+                line = "fish_add_path ~/.cargo/bin\n"
+                if line not in content:
+                    content = line + content
+                    fish_cfg.write_text(content)
+                    log_msg("Added cargo bin to fish PATH")
         else:
             log_msg("Skipped utility installation", False)
     except Exception as e:
@@ -644,6 +711,8 @@ def screen_installing(stdscr, state: InstallState):
 
     log_y += 1
     stdscr.addstr(log_y, 2, "  Done! Press SPACE / ENTER to exit.", curses.A_BOLD)
+    log_y += 1
+    stdscr.addstr(log_y, 2, "  Hint: quit Hyprland (SUPER + M) and login again to apply changes.", curses.A_DIM)
     stdscr.refresh()
     await_key(stdscr)
     return True
@@ -689,6 +758,10 @@ def main(stdscr):
         return
 
     screen_os_check(stdscr, state)
+
+    if not screen_kb_layout_prompt(stdscr, state):
+        screen_cancelled(stdscr)
+        return
 
     if not screen_dep_check(stdscr, state):
         screen_cancelled(stdscr)
