@@ -78,6 +78,7 @@ class InstallState:
         self.kb_mode = "my_binds"
         self.keep_animations = True
         self.confirmed = False
+        self.dist_family = "unknown"
 
 
 def detect_os(state: InstallState):
@@ -90,6 +91,125 @@ def detect_os(state: InstallState):
     except Exception:
         state.os_name = "unknown"
     state.is_arch = state.os_name == "arch"
+
+
+def detect_distro_family(state: InstallState) -> str:
+    os_name = state.os_name
+    arch_like = {"arch", "archarm", "cachyos", "endeavouros", "manjaro", "artix"}
+    deb_like = {"debian", "ubuntu", "pop", "linuxmint", "elementary", "kali", "zorin", "mx"}
+    fedora_like = {"fedora", "rhel", "centos", "rocky", "almalinux"}
+    suse_like = {"opensuse", "opensuse-tumbleweed", "suse", "sles"}
+    if os_name in arch_like:
+        return "arch"
+    if os_name in deb_like:
+        return "deb"
+    if os_name in fedora_like:
+        return "fedora"
+    if os_name in suse_like:
+        return "suse"
+    if os_name in {"void"}:
+        return "void"
+    if os_name in {"alpine"}:
+        return "alpine"
+    if os_name in {"nixos"}:
+        return "nixos"
+    return "unknown"
+
+
+PKG_INSTALL: dict[str, dict[str, str | None]] = {
+    "hyprland": {
+        "arch": "sudo pacman -S hyprland",
+        "deb": "sudo apt install hyprland",
+        "fedora": "sudo dnf copr enable solopasha/hyprland && sudo dnf install hyprland",
+    },
+    "kitty": {
+        "arch": "sudo pacman -S kitty",
+        "deb": "sudo apt install kitty",
+        "fedora": "sudo dnf install kitty",
+    },
+    "alacritty": {
+        "arch": "sudo pacman -S alacritty",
+        "deb": "sudo apt install alacritty",
+        "fedora": "sudo dnf install alacritty",
+    },
+    "fish": {
+        "arch": "sudo pacman -S fish",
+        "deb": "sudo apt install fish",
+        "fedora": "sudo dnf install fish",
+    },
+    "python3": {
+        "arch": "sudo pacman -S python",
+        "deb": "sudo apt install python3",
+        "fedora": "sudo dnf install python3",
+    },
+    "hyprsunset": {
+        "arch": "sudo pacman -S hyprsunset",
+        "deb": None,
+        "fedora": "sudo dnf copr enable solopasha/hyprland && sudo dnf install hyprsunset",
+    },
+    "hyprpaper": {
+        "arch": "sudo pacman -S hyprpaper",
+        "deb": "sudo apt install hyprpaper",
+        "fedora": "sudo dnf copr enable solopasha/hyprland && sudo dnf install hyprpaper",
+    },
+    "zen-browser": {
+        "arch": "paru -S zen-browser-bin",
+        "deb": "flatpak install flathub app.zen_browser.zen",
+        "fedora": "flatpak install flathub app.zen_browser.zen",
+    },
+    "dolphin": {
+        "arch": "sudo pacman -S dolphin",
+        "deb": "sudo apt install dolphin",
+        "fedora": "sudo dnf install dolphin",
+    },
+    "powerprofilesctl": {
+        "arch": "sudo pacman -S power-profiles-daemon",
+        "deb": "sudo apt install power-profiles-daemon",
+        "fedora": "sudo dnf install power-profiles-daemon",
+    },
+    "htop": {
+        "arch": "sudo pacman -S htop",
+        "deb": "sudo apt install htop",
+        "fedora": "sudo dnf install htop",
+    },
+    "nmtui": {
+        "arch": "sudo pacman -S networkmanager",
+        "deb": "sudo apt install network-manager",
+        "fedora": "sudo dnf install NetworkManager-tui",
+    },
+    "vim": {
+        "arch": "sudo pacman -S vim",
+        "deb": "sudo apt install vim",
+        "fedora": "sudo dnf install vim",
+    },
+    "gsettings": {
+        "arch": "sudo pacman -S glib2",
+        "deb": "sudo apt install libglib2.0-bin",
+        "fedora": "sudo dnf install glib2",
+    },
+    "cargo": {
+        "arch": "sudo pacman -S rust",
+        "deb": "sudo apt install cargo",
+        "fedora": "sudo dnf install cargo",
+    },
+    "rapidfuzz": {
+        "arch": "pip install rapidfuzz",
+        "deb": "pip install rapidfuzz",
+        "fedora": "pip install rapidfuzz",
+    },
+}
+
+
+def get_install_hints(dep_name: str) -> list[tuple[str, str]]:
+    info = PKG_INSTALL.get(dep_name, {})
+    hints = []
+    for label in ("arch", "deb", "fedora"):
+        cmd = info.get(label)
+        if cmd:
+            hints.append((label, cmd))
+        else:
+            hints.append((label, "-- not in official repos"))
+    return hints
 
 
 def check_deps(state: InstallState):
@@ -313,34 +433,44 @@ def screen_dep_check(stdscr, state: InstallState):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
 
-    box_w = min(42, cols - 4)
-    bx = (cols - box_w) // 2
-    by = 2
+    display_lines: list[tuple[str, int]] = []
+    for name, found in state.dep_results:
+        if found:
+            display_lines.append((f" \u2713 {name}", THEME["success"]))
+        else:
+            display_lines.append((f" \u2717 {name}", THEME["error"]))
+            hints = get_install_hints(name)
+            for label, cmd in hints:
+                display_lines.append((f"   {label}: {cmd}", THEME["dim"]))
 
+    by = 2
+    box_w = min(56, cols - 4)
+    bx = (cols - box_w) // 2
     scroll = 0
     max_visible = rows - by - 5
+    total = len(display_lines)
 
     while True:
         stdscr.erase()
         rows, cols = stdscr.getmaxyx()
-        box_w = min(42, cols - 4)
+        box_w = min(56, cols - 4)
         bx = (cols - box_w) // 2
         max_visible = rows - by - 5
 
-        draw_box(stdscr, by, bx, min(max_visible + 3, len(state.dep_results) + 3), box_w)
+        box_h = min(max_visible + 3, total + 3)
+        draw_box(stdscr, by, bx, box_h, box_w)
 
         title = " Dependency Check "
         cx = (cols - len(title)) // 2
         stdscr.addstr(by + 1, cx, title, THEME["highlight"])
 
-        visible = state.dep_results[scroll:scroll + max_visible]
-        for i, (name, found) in enumerate(visible):
-            icon = "\u2713" if found else "\u2717"
-            icon_attr = THEME["success"] if found else THEME["error"]
-            label = f" {icon} {name} "
-            stdscr.addstr(by + 3 + i, bx + 2, label, icon_attr)
+        visible = display_lines[scroll:scroll + max_visible]
+        for i, (text, attr) in enumerate(visible):
+            max_w = box_w - 4
+            if len(text) > max_w:
+                text = text[:max_w - 1] + "\u2026"
+            stdscr.addstr(by + 3 + i, bx + 2, text, attr)
 
-        total = len(state.dep_results)
         if total > max_visible:
             pct = f" [{scroll + 1}-{min(scroll + max_visible, total)}/{total}] "
             stdscr.addstr(rows - 3, cols - len(pct) - 2, pct, THEME["dim"])
@@ -644,7 +774,7 @@ def screen_animations_prompt(stdscr, state: InstallState) -> bool:
     cx = (cols - len(title)) // 2
     stdscr.addstr(by + 1, cx, title, THEME["highlight"])
 
-    desc = " keep animations from your current config? "
+    desc = " Use BlurMyCLI's animations? "
     cx = (cols - len(desc)) // 2
     stdscr.addstr(by + 3, cx, desc, THEME["dim"])
     desc2 = " (No = Hyprland defaults, clean & minimal) "
@@ -1087,6 +1217,7 @@ def main(stdscr):
     state = InstallState()
 
     detect_os(state)
+    state.dist_family = detect_distro_family(state)
     check_deps(state)
     find_existing_configs(state)
 
