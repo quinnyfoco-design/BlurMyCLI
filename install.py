@@ -76,6 +76,7 @@ class InstallState:
         self.wallpaper_path = ""
         self.terminal_choice = "kitty"
         self.kb_mode = "my_binds"
+        self.keep_animations = True
         self.confirmed = False
 
 
@@ -628,6 +629,56 @@ def screen_bindings_prompt(stdscr, state: InstallState) -> bool:
     return True
 
 
+def screen_animations_prompt(stdscr, state: InstallState) -> bool:
+    stdscr.erase()
+    rows, cols = stdscr.getmaxyx()
+
+    box_w = min(56, cols - 4)
+    box_h = 9
+    bx = (cols - box_w) // 2
+    by = (rows - box_h) // 2
+
+    draw_box(stdscr, by, bx, box_h, box_w)
+
+    title = " Animations "
+    cx = (cols - len(title)) // 2
+    stdscr.addstr(by + 1, cx, title, THEME["highlight"])
+
+    desc = " keep animations from your current config? "
+    cx = (cols - len(desc)) // 2
+    stdscr.addstr(by + 3, cx, desc, THEME["dim"])
+    desc2 = " (No = Hyprland defaults, clean & minimal) "
+    cx = (cols - len(desc2)) // 2
+    stdscr.addstr(by + 4, cx, desc2, THEME["dim"])
+
+    choice = state.keep_animations
+    while True:
+        y = by + 6
+        yes_attr = THEME["success"] | curses.A_REVERSE if choice else THEME["success"]
+        no_attr = THEME["error"] | curses.A_REVERSE if not choice else THEME["error"]
+        stdscr.addstr(y, bx + 6, " [Y]  Yes  ", yes_attr)
+        stdscr.addstr(y, bx + 20, " [N]  No  ", no_attr)
+        stdscr.refresh()
+
+        key = stdscr.getch()
+        if key == curses.KEY_RESIZE:
+            return screen_animations_prompt(stdscr, state)
+        if key in (ord("y"), ord("Y")):
+            choice = True
+        elif key in (ord("n"), ord("N")):
+            choice = False
+        elif key == curses.KEY_LEFT:
+            choice = True
+        elif key == curses.KEY_RIGHT:
+            choice = False
+        elif key in (10, 13, 32):
+            state.keep_animations = choice
+            break
+        elif key in (27, ord("q"), ord("Q")):
+            return False
+    return True
+
+
 def screen_existing_configs(stdscr, state: InstallState):
     stdscr.erase()
     rows, cols = stdscr.getmaxyx()
@@ -722,6 +773,7 @@ def screen_summary(stdscr, state: InstallState):
     missing = [n for n, f in state.dep_results if not f]
     blur_text = "enabled" if state.blur else "disabled"
     rec_text = "yes" if state.rec_utils else "no"
+    anim_text = "keep mine" if state.keep_animations else "defaults"
     action_labels = {"bak": "backup + overwrite", "overwrite": "overwrite", "skip": "skip"}
     config_text = action_labels.get(state.config_action, state.config_action)
     wall_text = state.wallpaper_path if state.wallpaper_path else "none"
@@ -734,6 +786,7 @@ def screen_summary(stdscr, state: InstallState):
         ("Rec utils", rec_text),
         ("Terminal", state.terminal_choice),
         ("Bindings", 'My Binds' if state.kb_mode == 'my_binds' else 'Basic Binds'),
+        ("Animations", anim_text),
         ("Wallpaper", wall_text),
         ("Existing", config_text),
     ]
@@ -839,6 +892,18 @@ bind = $mainMod SHIFT, down, movewindow, d
 """
 
     try:
+        existing_animations = ""
+        if state.keep_animations:
+            existing_hypr = XDG_CONFIG / "hypr" / "hyprland.conf"
+            if existing_hypr.exists():
+                existing_content = existing_hypr.read_text()
+                anim_start = existing_content.find("# animation\n")
+                if anim_start != -1:
+                    deco_start = existing_content.find("\n# deco", anim_start)
+                    if deco_start == -1:
+                        deco_start = len(existing_content)
+                    existing_animations = existing_content[anim_start:deco_start].strip()
+
         term_subdir = state.terminal_choice
         term_file = "kitty.conf" if state.terminal_choice == "kitty" else "alacritty.toml"
         config_mapping = [
@@ -900,7 +965,27 @@ bind = $mainMod SHIFT, down, movewindow, d
                     )
 
             hypr_conf.write_text(content)
-            log_msg("Patched hyprland.conf (paths, terminal, binds)")
+
+            if state.keep_animations and existing_animations:
+                hypr_content = hypr_conf.read_text()
+                anim_start = hypr_content.find("# animation\n")
+                deco_start = hypr_content.find("\n# deco")
+                if anim_start != -1 and deco_start != -1:
+                    hypr_content = hypr_content[:anim_start] + existing_animations + hypr_content[deco_start:]
+                    hypr_conf.write_text(hypr_content)
+                    log_msg("Injected your custom animations")
+                else:
+                    log_msg("Could not inject animations (section markers missing)", False)
+            elif not state.keep_animations:
+                hypr_content = hypr_conf.read_text()
+                anim_start = hypr_content.find("# animation\n")
+                deco_start = hypr_content.find("\n# deco")
+                if anim_start != -1 and deco_start != -1:
+                    hypr_content = hypr_content[:anim_start] + hypr_content[deco_start + 1:]
+                    hypr_conf.write_text(hypr_content)
+                    log_msg("Stripped animations — using Hyprland defaults")
+                else:
+                    log_msg("No animation section to strip", False)
 
         cli_menu_dst = LOCAL_BIN / "cli-menu.py" if state.rec_utils else None
         if cli_menu_dst and cli_menu_dst.exists():
@@ -1032,6 +1117,10 @@ def main(stdscr):
         return
 
     if not screen_bindings_prompt(stdscr, state):
+        screen_cancelled(stdscr)
+        return
+
+    if not screen_animations_prompt(stdscr, state):
         screen_cancelled(stdscr)
         return
 
